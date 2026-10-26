@@ -43,6 +43,11 @@ final class Config {
     static final String ROWS_BELOW_DOCK_KEY = "rows_below_dock";
     static final String WALLPAPER_CHOICE_KEY = "wallpaper_choice";
     static final String DOCK_OPACITY_KEY = "dock_opacity";
+    /** The layout picked from the top bar's Layout button: "classic", or a theme's config-<name>.json overlay. */
+    static final String LAYOUT_KEY = "layout";
+    static final String CLASSIC = "classic";
+    /** The layouts the Layout button offers, in its order; a missing overlay file leaves one out. */
+    static final String[] LAYOUTS = {CLASSIC, "arc", "side"};
     /**
      * Counts the changes made in Launcher settings. Home remembers the count it was built with and rebuilds on
      * resume when it differs, however the settings were left (see MainActivity#onResume).
@@ -392,7 +397,31 @@ final class Config {
         File dir = dir(ctx);
         File file = dir != null ? new File(dir, FILE_NAME) : null;
         boolean mounted = Environment.MEDIA_MOUNTED.equals(Environment.getExternalStorageState());
-        JSONObject json = readOverlay(ctx, file, mounted);
+        JSONObject json = readOverlay(ctx, file, mounted, FILE_NAME);
+        // A layout picked on the TV: its config-<name>.json overlays config.json, key by key. Visual keys only: the
+        // remote-key helpers read the config once when they bind, so a layout must not change their keys.
+        String layout = ctx.getSharedPreferences(SETTINGS_NAME, Context.MODE_PRIVATE).getString(LAYOUT_KEY, CLASSIC);
+        // Unmounted (the first 30-40 s after boot on some TVs), readOverlay falls back to its private copy, so Home
+        // comes up in the picked layout straight away instead of Classic.
+        if (mounted && dir != null) {
+            for (String name : LAYOUTS) if (!CLASSIC.equals(name)) cached(ctx, dir, layoutFileName(name), true);
+        }
+        JSONObject layoutJson = CLASSIC.equals(layout) ? null : readOverlay(ctx,
+                dir == null ? null : new File(dir, layoutFileName(layout)), mounted && dir != null, layoutFileName(layout));
+        if (layoutJson == null) {
+            layout = CLASSIC;
+        } else {
+            if (json == null) json = new JSONObject();
+            for (java.util.Iterator<String> keys = layoutJson.keys(); keys.hasNext(); ) {
+                String key = keys.next();
+                if (key.equals("app_keys") || key.contains("key_")) continue;
+                try {
+                    json.put(key, layoutJson.get(key));
+                } catch (JSONException ignored) {
+                    // a key that cannot be copied keeps config.json's value
+                }
+            }
+        }
         if (json != null) {
             applied = true;
             dock = stringList(json, "dock_apps", dock);
@@ -479,7 +508,10 @@ final class Config {
         if (chosenRows >= 0 && chosenRows <= 3) rowsBelow = chosenRows;
         animations = choices.getBoolean("animations", animations);
         advancedEffects = choices.getBoolean("advanced_effects", advancedEffects);
-        File wallpaper = dir != null ? new File(dir, WALLPAPER_NAME) : null;
+        // A layout's own picture (wallpaper_file, e.g. wallpaper-arc.webp) instead of wallpaper.jpg.
+        String wallpaperFile = json == null ? "" : string(json, "wallpaper_file", "");
+        boolean ownWallpaper = ThemeFiles.layoutFile(wallpaperFile);
+        File wallpaper = cached(ctx, dir, ownWallpaper ? wallpaperFile : WALLPAPER_NAME, mounted);
         if (wallpaper != null && !(wallpaper.isFile() && wallpaper.length() > 0)) wallpaper = null;
         // A theme can also switch the wallpaper off while the file is still there.
         boolean wallpaperEnabled = json == null || bool(json, "wallpaper", true);
@@ -499,7 +531,7 @@ final class Config {
         if (wallpapers.isEmpty() && wallpaper != null) wallpapers.add(wallpaper);
         // An on-TV wallpaper pick overrides the theme: a filename from the wallpapers/
         // collection, or "none". Unset means the theme decides (off by default).
-        String wallpaperChoice = choices.getString(WALLPAPER_CHOICE_KEY, null);
+        String wallpaperChoice = ownWallpaper ? null : choices.getString(WALLPAPER_CHOICE_KEY, null);
         List<File> chosen = WallpaperRotation.chosen(dir == null ? Collections.emptyList()
                 : WallpaperRotation.images(new File(dir, "wallpapers")), wallpaper, wallpaperChoice);
         if (chosen != null) {
@@ -512,7 +544,7 @@ final class Config {
         Festival festival = json == null ? Festival.NONE : Festival.parse(string(json, "festival", ""),
                 string(json, "festival_until", ""), string(json, "greeting", ""), string(json, "accent_color", ""));
 
-        return new Config(dock, fillDock, hidden, libraryApps, liveTv, liveTvAction, liveTvInputId, packageMap(launchActions), packageMap(appLabels),
+        Config cfg = new Config(dock, fillDock, hidden, libraryApps, liveTv, liveTvAction, liveTvInputId, packageMap(launchActions), packageMap(appLabels),
                 packageMap(appBanners), panelService,
                 panelAction, panelExtra, coocaaSources, inputAction, inputUriScheme,
                 Math.max(1, columns), Math.max(0, rowsBelow), animations, advancedEffects,
@@ -521,6 +553,132 @@ final class Config {
                 wallpapers, rotationMinutes, wallpaperDim, dockOpacity, wallpaperOrder, applied,
                 festival, inputKeycodes, appKeys, stockHomeRedirect, json == null ? Collections.emptyList() : raceCalendar(json), cinematic, ambientGlow, appGlow, fadeRows,
                 Math.max(0, idleClockMinutes), keyFilter, dockGlass, glowStyle, wallpaperCaptions, handleViewInputs, tileMenu, dockEvenPadding, cinematicDots, cinematicWhiteFocus, wifiStatusColor, cinematicScrim, cinematicArt, wallpaperMoods, gamepadPassthrough);
+        cfg.layout = layout;
+        cfg.storageMounted = mounted;
+        if (json != null) cfg.readLayoutKeys(ctx, json);
+        return cfg;
+    }
+
+    // ---- layouts (config-<name>.json) ------------------------------------------------------------
+
+    /** False when Home started before shared storage was mounted (at boot): the theme's pictures were not readable. */
+    boolean storageMounted = true;
+    /** The layout in use: CLASSIC, or the name of the overlay that was read. */
+    String layout = CLASSIC;
+    /** Centres of the dock apps in 1920x1080 screen coordinates (logo_slots); null keeps the dock row. */
+    float[][] logoSlots;
+    /** Centre of the More apps button (more_slot), with logoSlots. */
+    float[] moreSlot;
+    /** Tile height of a slot logo at 1080p (logo_tile_height), and its focus zoom (logo_scale). */
+    float logoTileHeight = 124f, logoScale = 1.08f;
+    /** Left/Right moves between the slots (an arc), or Up/Down does (a column; logo_axis "vertical"). */
+    boolean logoVertical;
+    /** Tagline (the dock title) at a fixed point (tagline_slot, top-left at 1080p). */
+    float[] taglineSlot;
+    /** Tagline size in sp (tagline_size); 0 keeps the layout's own. */
+    float taglineSize;
+    /** Only the time top-left (minimal_header), and top-bar buttons as bare icons (bare_buttons). */
+    boolean minimalHeader, bareButtons;
+    /** The top-bar buttons fade out while focus is on Home's tiles, and back in when it reaches them (auto_hide_top_bar). */
+    boolean autoHideTopBar;
+    /** Where the clock's centre goes, at 1080p (clock_slot); null keeps it top-left. */
+    float[] clockSlot;
+    /** The weekday and the date as their own lines (day_slot, date_slot: centres, or left edges with
+     *  header_align_left), in day_size / date_size sp. */
+    float[] daySlot, dateSlot;
+    float daySize = 20f, dateSize = 18f;
+    boolean headerAlignLeft;
+    /** A font file pushed with the theme (clock_font, e.g. font-anurati.otf) for the weekday line: its private copy. */
+    File clockFont;
+    /** The glow colour of an app whose white logo gives none to sample (app_colors, "package=#RRGGBB"). */
+    Map<String, Integer> appColors = Collections.emptyMap();
+
+    static String layoutFileName(String layout) {
+        return "config-" + layout + ".json";
+    }
+
+    /**
+     * A theme file's private copy in getFilesDir, refreshed from the shared one whenever that is readable and changed;
+     * null when there is neither. Shared storage mounts 30-40 s after boot on some TVs (MiTV-MZTU0), and Home would
+     * show no wallpaper or font until then.
+     */
+    static File cached(Context ctx, File dir, String name, boolean mounted) {
+        File copy = new File(ctx.getFilesDir(), "theme-" + name);
+        if (mounted && dir != null) {
+            File src = new File(dir, name);
+            if (!src.isFile()) {
+                copy.delete();
+                return null;
+            }
+            if (copy.length() != src.length() || copy.lastModified() != src.lastModified()) {
+                try (InputStream in = new FileInputStream(src); FileOutputStream out = new FileOutputStream(copy)) {
+                    byte[] buf = new byte[16 * 1024];
+                    for (int n; (n = in.read(buf)) > 0; ) out.write(buf, 0, n);
+                } catch (IOException e) {
+                    Log.w(TAG, "could not keep a copy of " + src + ": " + e.getMessage());
+                    copy.delete();
+                    return src;
+                }
+                copy.setLastModified(src.lastModified());
+            }
+        }
+        return copy.isFile() ? copy : null;
+    }
+
+    private void readLayoutKeys(Context ctx, JSONObject json) {
+        logoSlots = points(json.optJSONArray("logo_slots"));
+        float[][] more = points(json.optJSONArray("more_slot") == null ? null
+                : new JSONArray().put(json.optJSONArray("more_slot")));
+        moreSlot = more == null ? null : more[0];
+        logoTileHeight = (float) json.optDouble("logo_tile_height", logoTileHeight);
+        logoScale = (float) json.optDouble("logo_scale", logoScale);
+        logoVertical = "vertical".equals(json.optString("logo_axis", ""));
+        float[][] slot = points(json.optJSONArray("tagline_slot") == null ? null
+                : new JSONArray().put(json.optJSONArray("tagline_slot")));
+        taglineSlot = slot == null ? null : slot[0];
+        taglineSize = (float) json.optDouble("tagline_size", 0);
+        minimalHeader = json.optBoolean("minimal_header", false);
+        bareButtons = json.optBoolean("bare_buttons", false);
+        autoHideTopBar = json.optBoolean("auto_hide_top_bar", false);
+        float[][] clock = points(json.optJSONArray("clock_slot") == null ? null
+                : new JSONArray().put(json.optJSONArray("clock_slot")));
+        clockSlot = clock == null ? null : clock[0];
+        daySlot = point(json, "day_slot");
+        dateSlot = point(json, "date_slot");
+        daySize = (float) json.optDouble("day_size", daySize);
+        dateSize = (float) json.optDouble("date_size", dateSize);
+        headerAlignLeft = json.optBoolean("header_align_left", false);
+        String font = json.optString("clock_font", "");
+        clockFont = ThemeFiles.layoutFile(font) ? cached(ctx, dir(ctx), font,
+                Environment.MEDIA_MOUNTED.equals(Environment.getExternalStorageState())) : null;
+        Map<String, Integer> colors = new HashMap<>();
+        for (Map.Entry<String, String> e : packageMap(stringList(json, "app_colors", new ArrayList<>())).entrySet()) {
+            try {
+                colors.put(e.getKey(), Color.parseColor(e.getValue()));
+            } catch (IllegalArgumentException ignored) {
+                // not a colour: that app keeps the sampled glow
+            }
+        }
+        appColors = colors;
+    }
+
+    /** [x, y] as a point, or null. */
+    private static float[] point(JSONObject json, String key) {
+        JSONArray p = json.optJSONArray(key);
+        float[][] list = p == null ? null : points(new JSONArray().put(p));
+        return list == null ? null : list[0];
+    }
+
+    /** [[x, y], ...] as points, or null when missing or any point is not two numbers. */
+    private static float[][] points(JSONArray list) {
+        if (list == null || list.length() == 0) return null;
+        float[][] out = new float[list.length()][];
+        for (int i = 0; i < list.length(); i++) {
+            JSONArray p = list.optJSONArray(i);
+            if (p == null || p.length() < 2 || Double.isNaN(p.optDouble(0)) || Double.isNaN(p.optDouble(1))) return null;
+            out[i] = new float[]{(float) p.optDouble(0), (float) p.optDouble(1)};
+        }
+        return out;
     }
 
     /**
@@ -599,8 +757,8 @@ final class Config {
      * start before the card is mounted (seen at every boot on a Xiaomi MiTV-MTEQ0), and without the copy it comes
      * up with the built-in dock order. A missing file on mounted storage still means no overlay.
      */
-    private static JSONObject readOverlay(Context ctx, File file, boolean mounted) {
-        File copy = new File(ctx.getFilesDir(), FILE_NAME);
+    private static JSONObject readOverlay(Context ctx, File file, boolean mounted, String copyName) {
+        File copy = new File(ctx.getFilesDir(), copyName);
         if (!mounted) return read(copy);
         JSONObject json = read(file);
         if (json == null) {

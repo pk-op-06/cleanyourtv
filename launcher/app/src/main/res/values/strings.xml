@@ -2,6 +2,11 @@
 <resources>
     <string name="app_name">Home</string>
     <string name="inputs">Inputs</string>
+    <string name="logos" translatable="false">Theme</string>
+    <string name="bluetooth" translatable="false">Bluetooth</string>
+    <string name="layout_classic" translatable="false">Classic</string>
+    <string name="layout_arc" translatable="false">Dark Knight</string>
+    <string name="layout_side" translatable="false">Gotham Guardian</string>
     <string name="wifi">Wi-Fi</string>
     <string name="settings">Settings</string>
     <string name="choose_input">Inputs</string>

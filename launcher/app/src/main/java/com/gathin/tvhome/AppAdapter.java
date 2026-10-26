@@ -208,6 +208,13 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     private final boolean tileMenu;
     /** Tile names and bundled banners that replace the app's own (config.xml, app_labels and app_banners). */
     private final Map<String, String> appLabels, appBanners;
+    /** A layout's dock at fixed points (Config.logoSlots): only the dock apps, sized by logo_tile_height. */
+    private final boolean slotMode;
+    private final float logoTileHeight, logoScale;
+    /** Glow colours given by the layout for white logos (app_colors). */
+    private final Map<String, Integer> appColors;
+    /** Opacity of a logo that is not focused, so the focused one stands out with no box around it. */
+    static final float LOGO_REST_ALPHA = 1f;
     private final List<Entry> items = new ArrayList<>();
 
     AppAdapter(Context ctx, TileListener listener, int dockSize, Config cfg) {
@@ -233,6 +240,10 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         this.tileMenu = cfg.tileMenu;
         this.appLabels = cfg.appLabels;
         this.appBanners = cfg.appBanners;
+        this.slotMode = cfg.logoSlots != null;
+        this.logoTileHeight = cfg.logoTileHeight;
+        this.logoScale = cfg.logoScale;
+        this.appColors = cfg.appColors;
         // Tiles keep their identity across reload(), so a focused tile stays on its app instead of
         // its view being rebound to whatever app now sits in that slot.
         setHasStableIds(true);
@@ -321,9 +332,17 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             fresh.add(docked + i, new Entry(Entry.EMPTY, "", new ComponentName(ctx, "empty-dock-slot-" + i),
                     null, null, null, 0));
         }
+        // A slot layout shows the dock apps only; the rest stay one press away in the App library.
+        if (slotMode && fresh.size() > dockSize) fresh.subList(dockSize, fresh.size()).clear();
         items.clear();
         items.addAll(fresh);
         notifyDataSetChanged();
+    }
+
+    /** The tile shows a theme logo: drawn with no card and no glass highlight. */
+    boolean isLogoTile(int position) {
+        String pkg = packageAt(position);
+        return pkg != null && appBanners.containsKey(pkg);
     }
 
     /** A banner_* drawable bundled with the launcher, or null for none or a name that is not one. */
@@ -371,6 +390,19 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         if (viewType == 1) {
             View row = LayoutInflater.from(ctx).inflate(R.layout.row_app_library, parent, false);
             View button = row.findViewById(R.id.btnLibrary);
+            if (slotMode) {
+                // A slot layout's library button is a bare icon, like the top bar's, white only when focused.
+                TextView label = (TextView) button;
+                label.setContentDescription(label.getText());
+                label.setText(null);
+                label.setCompoundDrawablePadding(0);
+                int pad = Math.round(10 * parent.getResources().getDisplayMetrics().density);
+                label.setPaddingRelative(pad, 0, pad, 0);
+                label.setBackgroundResource(R.drawable.bare_bg);
+                ViewGroup.MarginLayoutParams lp = (ViewGroup.MarginLayoutParams) label.getLayoutParams();
+                lp.width = Math.round(42 * parent.getResources().getDisplayMetrics().density);
+                lp.setMarginStart(0);   // the top-bar style's start margin would push it off its slot's centre
+            }
             button.setOnClickListener(v -> listener.onLibraryRequested());
             button.setOnFocusChangeListener((v, focused) -> { if (focused) listener.onLibraryFocused(); });
             button.setOnKeyListener((v, key, event) -> {
@@ -386,6 +418,11 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         int width = parent.getWidth() > 0 ? parent.getWidth() : parent.getMeasuredWidth();
         int inner = width - parent.getPaddingLeft() - parent.getPaddingRight();
         int w = tileWidthPx(inner, parent.getHeight(), dockSize, rowsBelowDock, dockTitle, dockRow, density), h = tileHeightPx(w);
+        if (slotMode) {
+            // Slot logos: a fixed size from the layout, scaled from 1080p like their points.
+            h = Math.round(logoTileHeight * parent.getRootView().getWidth() / 1920f);
+            w = Math.round(h * 16f / 9f);
+        }
         View card = v.findViewById(R.id.card);
         ViewGroup.LayoutParams cardLp = card.getLayoutParams();
         cardLp.width = w;
@@ -402,7 +439,8 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             v.setPadding(v.getPaddingLeft(), pad, v.getPaddingRight(), pad);
         }
         name.setLayoutParams(nameLp);
-        return new Holder(v, listener, animations, advancedEffects, reducedMotion, restNameAlpha, focusOvershoot);
+        return new Holder(v, listener, animations, advancedEffects, reducedMotion, restNameAlpha, focusOvershoot,
+                logoScale);
     }
 
     @Override
@@ -425,18 +463,25 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         h.card.setFocusable(true);
         h.name.setText(e.name);
         // The dock has no labels, unless always_show_names asks for them (DockDecoration then makes room in the band).
-        h.name.setVisibility(dockRow && position < dockSize && restNameAlpha == 0f ? View.INVISIBLE : View.VISIBLE);
+        // Slot logos have no names: the logo alone says what it is.
+        h.name.setVisibility(slotMode || dockRow && position < dockSize && restNameAlpha == 0f
+                ? View.INVISIBLE : View.VISIBLE);
         boolean focused = h.card.isFocused();   // a rebind after reload() can hit the focused tile
         h.name.setAlpha(focused ? 1f : restNameAlpha);
-        h.card.setScaleX(focused && animations ? focusScale() : 1f);
-        h.card.setScaleY(focused && animations ? focusScale() : 1f);
+        boolean logo = e.banner != null && appBanners.containsKey(e.pkg);
+        h.card.setTag(R.id.card, logo);
+        float zoom = logo ? logoScale : focusScale();
+        h.card.setScaleX(focused && animations ? zoom : 1f);
+        h.card.setScaleY(focused && animations ? zoom : 1f);
+        h.card.setAlpha(logo && !focused ? LOGO_REST_ALPHA : 1f);
         h.card.setTranslationY(focused && advancedEffects ? -4f * ctx.getResources().getDisplayMetrics().density : 0f);
         h.card.setTranslationZ(focused && advancedEffects ? 8f * ctx.getResources().getDisplayMetrics().density : 0f);
         h.banner.setScaleX(focused && advancedEffects ? 1.035f : 1f);
         h.banner.setScaleY(focused && advancedEffects ? 1.035f : 1f);
         // A fully opaque banner covers the whole card (centerCrop), so the card's own fill under it is drawn for
         // nothing on every frame; keep it under banners with transparent parts and under icon tiles.
-        h.card.setBackground(e.banner != null && e.banner.getOpacity() == PixelFormat.OPAQUE ? null : h.cardBackground);
+        h.card.setBackground(logo || e.banner != null && e.banner.getOpacity() == PixelFormat.OPAQUE
+                ? null : h.cardBackground);
         if (e.banner != null) {
             h.banner.setImageDrawable(e.banner);
             h.banner.setVisibility(View.VISIBLE);
@@ -619,6 +664,8 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     int ambientColorAt(int position) {
         if (position < 0 || position >= items.size()) return 0xFF444444;
         Entry e = items.get(position);
+        Integer given = appColors.get(e.pkg);
+        if (given != null) return given;
         if (e.ambient == 0) e.ambient = vividColor(e.banner != null ? e.banner : e.icon);
         return e.ambient;
     }
@@ -687,9 +734,11 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         /** Alpha of the name while the tile is not focused (always_show_names). */
         final float restNameAlpha;
         final boolean overshoot;
+        /** Focus zoom of a slot logo (Config.logoScale). */
+        final float logoScale;
 
         Holder(View v, TileListener listener, boolean animations, boolean advancedEffects,
-               boolean reducedMotion, float restNameAlpha, boolean overshoot) {
+               boolean reducedMotion, float restNameAlpha, boolean overshoot, float logoScale) {
             super(v);
             card = v.findViewById(R.id.card);
             cardBackground = card.getBackground();
@@ -702,6 +751,7 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             this.reducedMotion = reducedMotion;
             this.restNameAlpha = restNameAlpha;
             this.overshoot = overshoot;
+            this.logoScale = logoScale;
 
             final float density = v.getResources().getDisplayMetrics().density;
             card.setOutlineProvider(new ViewOutlineProvider() {
@@ -725,7 +775,9 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
                 view.animate().cancel();
                 banner.animate().cancel();
                 name.animate().cancel();
-                float scale = !animations ? 1f : advancedEffects ? 1.12f : 1.10f;
+                boolean logo = Boolean.TRUE.equals(view.getTag(R.id.card));
+                float scale = !animations ? 1f : logo ? logoScale : advancedEffects ? 1.12f : 1.10f;
+                if (logo) view.setAlpha(focused ? 1f : LOGO_REST_ALPHA);
                 float s = focused ? scale : 1f;
                 if (!animations) {
                     view.setScaleX(1f);
@@ -751,13 +803,15 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
                     // Only on focus: snapping it back to -6dp while it fades out would jump it up over the tile.
                     if (focused) name.setTranslationY(density * 4f);
                 } else {
-                    view.animate().scaleX(s).scaleY(s)
+                    android.view.ViewPropertyAnimator zoom = view.animate().scaleX(s).scaleY(s)
                             .translationY(focused && advancedEffects ? -4f * density : 0f)
                             .translationZ(focused && advancedEffects ? 8f * density : 0f)
                             .setDuration(advancedEffects ? (focused ? 220 : 170) : (focused ? 260 : 180))
-                            .setInterpolator(focused && !overshoot ? new DecelerateInterpolator(1.5f)
-                                    : new OvershootInterpolator(focused ? (advancedEffects ? 0.7f : 1.6f) : 0f))
-                            .withLayer().start();
+                            .setInterpolator(focused && (logo || !overshoot) ? new DecelerateInterpolator(1.5f)
+                                    : new OvershootInterpolator(focused ? (advancedEffects ? 0.7f : 1.6f) : 0f));
+                    // A layer is drawn at the tile's resting size and stretched, which blurs a logo zoomed to 1.5x;
+                    // a logo tile is one small bitmap, cheap to draw scaled every frame.
+                    (logo ? zoom : zoom.withLayer()).start();
                     if (advancedEffects) {
                         banner.animate().scaleX(focused ? 1.035f : 1f).scaleY(focused ? 1.035f : 1f)
                                 .setDuration(280).start();

@@ -171,6 +171,15 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private TextView greeting;
     private View clockBlock;
     private View btnInputs;
+    /** Top bar Layout button: opens the picker of Config.LAYOUTS. */
+    private View btnLogos;
+    /** A layout's dock at fixed points (Config.logoSlots): the D-pad follows the slots, not the grid. */
+    private boolean slotLayout, logoVertical;
+    /** Where a slot layout's tagline goes (Config.taglineSlot), in 1080p pixels. */
+    private float[] taglineSlot;
+    private String layoutName = Config.CLASSIC;
+    /** Set across recreate() so the Layout button keeps focus after a layout is picked. */
+    private static final String EXTRA_FOCUS_LAYOUT = "focus_layout_button";
     /** config show_inputs_pill: false keeps the Inputs pill hidden even when the TV has inputs. */
     private boolean showInputsPill = true;
     private TextView btnWifi;
@@ -497,6 +506,16 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         ((GridLayoutManager) grid.getLayoutManager()).setSpanSizeLookup(new GridLayoutManager.SpanSizeLookup() {
             @Override public int getSpanSize(int position) { return adapter != null && adapter.isLibraryAt(position) ? COLUMNS : 1; }
         });
+        slotLayout = cfg.logoSlots != null;
+        logoVertical = cfg.logoVertical;
+        taglineSlot = cfg.taglineSlot;
+        layoutName = cfg.layout;
+        if (slotLayout) {
+            grid.setLayoutManager(new SlotLayoutManager(cfg.logoSlots, cfg.moreSlot));
+            // Slots sit anywhere on screen, also above this view's top: nothing on the way may clip them.
+            ((ViewGroup) grid.getParent()).setClipChildren(false);
+            ((ViewGroup) grid.getParent().getParent()).setClipChildren(false);
+        }
         grid.setHasFixedSize(true);
         grid.setItemAnimator(null);
         // Tiles that scroll out while one is carried come back from the view cache without a rebind; set their
@@ -511,7 +530,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             public void onChildViewDetachedFromWindow(@NonNull View v) {
             }
         });
-        if (dockRow) grid.addItemDecoration(new DockDecoration(COLUMNS, density, cinematic, cfg.alwaysShowNames, cfg.dockOpacity, cfg.dockGlass, cfg.dockEvenPadding));
+        // A slot layout has no dock band: its logos float on the wallpaper.
+        if (dockRow && !slotLayout) grid.addItemDecoration(new DockDecoration(COLUMNS, density, cinematic,
+                cfg.alwaysShowNames, cfg.dockOpacity, cfg.dockGlass, cfg.dockEvenPadding));
         if (cfg.fadeRows) TopFade.attach(grid, 48 * density);
         // Reduced motion: the tiles are simply there, with no entrance (reloadApps skips it there too).
         if (animations && !reducedMotion) {
@@ -529,6 +550,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         // rows_below_dock grid rows under it; the rest of the grid stays below until you press Down.
         int rowsBelowDock = cfg.rowsBelowDock;
         grid.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+            if (slotLayout) return;   // SlotLayoutManager places every tile itself
             int h = b - t;
             // Item height follows the tile size, which follows the columns and the rows that must fit (AppAdapter.tileWidthPx).
             int inner = (r - l) - grid.getPaddingLeft() - grid.getPaddingRight();
@@ -607,6 +629,45 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                     new Intent(this, LauncherSettingsActivity.class), LAUNCHER_SETTINGS_REQUEST);
             else open(systemIntent(Settings.ACTION_SETTINGS));
         });
+        btnLogos = findViewById(R.id.btnLogos);
+        btnLogos.setVisibility(availableLayouts().size() > 1 ? View.VISIBLE : View.GONE);
+        btnLogos.setOnClickListener(v -> showLayoutPicker());
+        View btnBluetooth = findViewById(R.id.btnBluetooth);
+        btnBluetooth.setOnClickListener(v -> openBluetooth());
+        if (cfg.minimalHeader) {
+            // Only the time: no greeting, AM/PM, divider or date.
+            greeting.setVisibility(View.GONE);
+            findViewById(R.id.ampm).setVisibility(View.GONE);
+            View dateColumn = (View) findViewById(R.id.date).getParent();
+            ViewGroup clockRow = (ViewGroup) dateColumn.getParent();
+            dateColumn.setVisibility(View.GONE);
+            clockRow.getChildAt(clockRow.indexOfChild(dateColumn) - 1).setVisibility(View.GONE);
+        }
+        if (cfg.taglineSize > 0) heroName.setTextSize(TypedValue.COMPLEX_UNIT_SP, cfg.taglineSize);
+        // clock_font: the theme's own typeface for the weekday line. Only that one: a display font may have no
+        // digits (the trial Anurati draws boxes for them), and the time and date are mostly digits.
+        android.graphics.Typeface face = null;
+        File fontFile = cfg.clockFont;
+        if (fontFile != null && fontFile.isFile()) {
+            try {
+                face = android.graphics.Typeface.createFromFile(fontFile);
+            } catch (RuntimeException e) {
+                face = null;   // not a font Android can read: keep the built-in one
+            }
+        }
+        if (cfg.daySlot != null) addHeaderLine("EEEE", cfg.daySlot, cfg.daySize, face, cfg.headerAlignLeft);
+        if (cfg.dateSlot != null) addHeaderLine("d MMMM", cfg.dateSlot, cfg.dateSize, face, cfg.headerAlignLeft);
+        if (cfg.clockSlot != null) {
+            // clock_slot: the time centred on a point of the layout. Re-placed whenever its width changes (9:59 to 10:00).
+            final float[] at = cfg.clockSlot;
+            findViewById(R.id.clock).addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+                Rect c = new Rect(0, 0, v.getWidth(), v.getHeight());
+                root.offsetDescendantRectToMyCoords(v, c);   // layout position, without the translation below
+                float scale = root.getWidth() / 1920f;
+                clockBlock.setTranslationX(at[0] * scale - c.exactCenterX());
+                clockBlock.setTranslationY(at[1] * scale - c.exactCenterY());
+            });
+        }
         btnReorder = findViewById(R.id.btnReorder);
         btnReorder.setOnClickListener(v -> toggleReorder());
         btnReorder.setVisibility(cfg.reorderButton ? View.VISIBLE : View.GONE);
@@ -650,6 +711,16 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             makeIconOnly((TextView) btnSettings);
         }
         if (cfg.iconOnlyInputs) makeIconOnly((TextView) btnInputs);
+        if (cfg.bareButtons) {
+            // Bare icons: no pill and no label, a white circle only behind the focused one.
+            wifiIconOnly = true;
+            for (View button : new View[]{btnInputs, btnWifi, btnSettings}) {
+                if (((TextView) button).getText().length() > 0) makeIconOnly((TextView) button);
+            }
+            for (View button : new View[]{btnLogos, btnInputs, btnWifi, findViewById(R.id.btnBluetooth), btnSettings}) {
+                button.setBackgroundResource(R.drawable.bare_bg);
+            }
+        }
         btnSettings.setOnLongClickListener(v -> {
             showSettingsMenu();
             return true;
@@ -666,19 +737,23 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
                 focusTile(lastFocused % COLUMNS);
                 return true;
             }
-            int firstButton = btnInputs.getVisibility() == View.VISIBLE ? R.id.btnInputs : firstTopButton().getId();
+            int firstButton = btnLogos.getVisibility() == View.VISIBLE ? R.id.btnLogos
+                    : btnInputs.getVisibility() == View.VISIBLE ? R.id.btnInputs : firstTopButton().getId();
             int leftButton = rtlMenuBar ? R.id.btnSettings : firstButton;
             int rightButton = rtlMenuBar ? firstButton : R.id.btnSettings;
             if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) return v.getId() == leftButton;
             return keyCode == KeyEvent.KEYCODE_DPAD_RIGHT && v.getId() == rightButton;
         };
+        btnLogos.setOnKeyListener(pillKeys);
         btnInputs.setOnKeyListener(pillKeys);
         btnWifi.setOnKeyListener(pillKeys);
+        findViewById(R.id.btnBluetooth).setOnKeyListener(pillKeys);
         btnSettings.setOnKeyListener(pillKeys);
         btnReorder.setOnKeyListener(pillKeys);
         btnLibraryTop.setOnKeyListener(pillKeys);
         if (advancedEffects) {
-            for (View button : new View[]{btnInputs, btnWifi, btnReorder, btnLibraryTop, btnSettings}) {
+            for (View button : new View[]{btnLogos, btnInputs, btnWifi, findViewById(R.id.btnBluetooth), btnReorder,
+                    btnLibraryTop, btnSettings}) {
                 button.setOnFocusChangeListener((view, focused) -> view.animate()
                         .scaleX(focused ? 1.04f : 1f).scaleY(focused ? 1.04f : 1f)
                         .setDuration(reducedMotion ? Motion.REDUCED_MS : 160).start());
@@ -687,9 +762,24 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         if (festive) applyFestiveSkin((TextView) btnInputs, (TextView) btnSettings);
 
         // Hide the glass when focus leaves the tiles.
+        // auto_hide_top_bar: the buttons fade out while focus is on the tiles or the library button, and in when it
+        // reaches them. Alpha only: they stay focusable, so Up still lands on them, and no layout pass runs.
+        View topBar = findViewById(R.id.topButtons);
+        boolean autoHideTopBar = cfg.autoHideTopBar;
+        if (autoHideTopBar) {
+            topBar.forceHasOverlappingRendering(false);
+            topBar.setAlpha(0f);
+        }
         getWindow().getDecorView().getViewTreeObserver().addOnGlobalFocusChangeListener((oldF, newF) -> {
             boolean onTile = newF != null && newF.getId() == R.id.card;
             if (!onTile) hideGlass();
+            if (!autoHideTopBar || newF == null) return;
+            boolean inBar = newF.getParent() == topBar;
+            float target = inBar ? 1f : 0f;
+            if (topBar.getAlpha() == target) return;
+            topBar.animate().cancel();
+            topBar.animate().alpha(target).setDuration(reducedMotion ? Motion.REDUCED_MS : inBar ? 200 : 150)
+                    .setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
         });
 
         packageFilter.addAction(Intent.ACTION_PACKAGE_ADDED);
@@ -999,7 +1089,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         final int returnSlot = lastFocused;
         grid.post(() -> {
             int pos = adapter.positionOf(returnKey);
-            if (returnToLibrary || libraryFocusPending) focusLibrary();
+            if (getIntent().getBooleanExtra(EXTRA_FOCUS_LAYOUT, false)) {
+                getIntent().removeExtra(EXTRA_FOCUS_LAYOUT);
+                btnLogos.requestFocus();
+            } else if (returnToLibrary || libraryFocusPending) focusLibrary();
             else focusTile(pos >= 0 ? pos : returnSlot);
             tilesReady = true;
             startPendingSettingsReorder();
@@ -1416,6 +1509,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
      * afterwards if the moved tile itself ends up off screen.
      */
     private void keepScroll(Runnable change) {
+        if (!(grid.getLayoutManager() instanceof GridLayoutManager)) {
+            change.run();
+            return;
+        }
         GridLayoutManager lm = (GridLayoutManager) grid.getLayoutManager();
         int first = lm.findFirstVisibleItemPosition();
         View firstView = first != RecyclerView.NO_POSITION ? lm.findViewByPosition(first) : null;
@@ -1459,7 +1556,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         if (openPopup != null) openPopup.dismiss();
         libraryFocusPending = false;
         libraryFromTopBar = false;
-        appLibrary = new AppLibraryDialog(this, animations, reducedMotion, appLibrarySelection, adapter::containsPackage, () -> reloadApps(false), () -> {
+        // A slot layout shows only the dock on Home, and the library is its "More apps": OK there opens the app.
+        appLibrary = new AppLibraryDialog(this, animations, reducedMotion, appLibrarySelection,
+                slotLayout ? pkg -> true : adapter::containsPackage, () -> reloadApps(false), () -> {
             appLibrary = null;
             openPopup = null;
             if (libraryFromTopBar) {
@@ -1488,6 +1587,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             });
             return;
         }
+        // Logo tiles have no box: the zoom alone shows focus.
+        glass.setVisibility(adapter.isLogoTile(position) ? View.INVISIBLE : View.VISIBLE);
         // Tile rect in root coordinates, using layout positions (ignores the scale animation).
         Rect r = tileRect;
         r.set(0, 0, card.getWidth(), card.getHeight());
@@ -1579,7 +1680,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private void showHero(int position, float dockTopInRoot) {
         String label = adapter.labelAt(position);
         int color = adapter.ambientColorAt(position);
-        float y = dockTopInRoot - 14 * density - 26 * density - hero.getHeight();
+        float y = slotLayout ? placeSlotHero(position)
+                : dockTopInRoot - 14 * density - 26 * density - hero.getHeight();
         boolean changed = !label.contentEquals(heroName.getText());
         if (cinematic && heroArtAlpha > 0f) showHeroArt(position);
 
@@ -2091,6 +2193,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
     @Override
     public boolean onTileVerticalKey(int position, int keyCode) {
+        if (slotLayout) return onSlotKey(position, keyCode);
         int count = adapter.appCount();
         int target;
         // Horizontal: swallow the key at a row's ends so focus never wraps to the next row or
@@ -2131,13 +2234,169 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     }
 
     /** The first top-bar button after Inputs that is shown: the network pill, Reorder, then Settings (always there). */
+    // ---- layouts -----------------------------------------------------------------------------------
+
+    /** Classic, and every layout whose config-<name>.json the theme pushed. */
+    private List<String> availableLayouts() {
+        List<String> out = new ArrayList<>();
+        File dir = Config.dir(this);
+        for (String name : Config.LAYOUTS) {
+            // The private copy (Config.cached) counts too: at boot the shared one is not readable yet.
+            if (Config.CLASSIC.equals(name) || dir != null && new File(dir, Config.layoutFileName(name)).isFile()
+                    || new File(getFilesDir(), "theme-" + Config.layoutFileName(name)).isFile()) {
+                out.add(name);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * Bluetooth: Android TV's "Remotes and accessories" page (a settings slice), where paired headphones connect with
+     * one press. Some firmware (MiTV-MZTU0) has no handler for the standard Bluetooth action; it is the fallback.
+     */
+    private void openBluetooth() {
+        Intent accessories = new Intent("android.settings.SLICE_SETTINGS")
+                .putExtra("slice_uri", "content://com.android.tv.settings.accessories.sliceprovider/general");
+        if (accessories.resolveActivity(getPackageManager()) != null) open(accessories);
+        else open(systemIntent(Settings.ACTION_BLUETOOTH_SETTINGS));
+    }
+
+    /**
+     * The Theme button's picker: one card per layout with the theme's snapshot (preview-<name>.webp), the current
+     * one ticked. Picking another saves it and rebuilds Home, with focus back on this button.
+     */
+    private void showLayoutPicker() {
+        View panel = getLayoutInflater().inflate(R.layout.popup_inputs, root, false);
+        LinearLayout rows = panel.findViewById(R.id.rows);
+        rows.setOrientation(LinearLayout.HORIZONTAL);
+        PopupWindow popup = glassPopup(panel, ViewGroup.LayoutParams.WRAP_CONTENT);
+        List<Bitmap> previews = new ArrayList<>();
+        File dir = Config.dir(this);
+        View current = null;
+        for (String name : availableLayouts()) {
+            View card = getLayoutInflater().inflate(R.layout.item_layout_choice, rows, false);
+            ImageView image = card.findViewById(R.id.preview);
+            File file = Config.cached(this, dir, "preview-" + name + ".webp",
+                    android.os.Environment.MEDIA_MOUNTED.equals(android.os.Environment.getExternalStorageState()));
+            if (file != null && file.isFile()) {
+                android.graphics.BitmapFactory.Options o = new android.graphics.BitmapFactory.Options();
+                o.inPreferredConfig = Bitmap.Config.RGB_565;
+                Bitmap bmp = android.graphics.BitmapFactory.decodeFile(file.getPath(), o);
+                if (bmp != null) {
+                    previews.add(bmp);
+                    image.setImageBitmap(bmp);
+                }
+            }
+            int title = Config.CLASSIC.equals(name) ? R.string.layout_classic
+                    : "arc".equals(name) ? R.string.layout_arc : R.string.layout_side;
+            boolean chosen = name.equals(layoutName);
+            ((TextView) card.findViewById(R.id.title)).setText(chosen
+                    ? getString(title) + "  \u2713" : getString(title));
+            card.setOnClickListener(v -> {
+                popup.dismiss();
+                if (chosen) return;
+                getSharedPreferences(Config.SETTINGS_NAME, MODE_PRIVATE).edit().putString(Config.LAYOUT_KEY, name).commit();
+                getIntent().putExtra(EXTRA_FOCUS_LAYOUT, true);
+                recreate();
+            });
+            rows.addView(card);
+            if (chosen) current = card;
+        }
+        // The snapshots are only for the picker: free them as soon as it closes.
+        popup.setOnDismissListener(() -> {
+            if (openPopup == popup) openPopup = null;
+            for (Bitmap bmp : previews) bmp.recycle();
+        });
+        // A known width keeps the drop-down on screen; hang it under Settings, right-aligned like the top menu.
+        panel.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED);
+        popup.setWidth(Math.min(panel.getMeasuredWidth(), root.getWidth() - (int) (112 * density)));
+        dropIn(popup, panel, findViewById(R.id.btnSettings), Gravity.END);
+        (current != null ? current : rows.getChildAt(0)).requestFocus();
+    }
+
+    /**
+     * day_slot / date_slot: a weekday or date line (TextClock pattern) centred on a point at 1080p, or starting at it
+     * with left alignment. Placed again whenever its width changes, like the clock.
+     */
+    private void addHeaderLine(String pattern, float[] at, float sizeSp, android.graphics.Typeface face, boolean left) {
+        MixedFontClock line = new MixedFontClock(this);
+        line.setFormat12Hour(pattern);
+        line.setFormat24Hour(pattern);
+        line.setAllCaps(true);
+        line.setLetterSpacing(0.12f);
+        line.setTextColor(0xE6FFFFFF);
+        line.setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp);
+        line.setFontFeatureSettings(null);
+        // A pattern with digits (the date) keeps them in the clock's font: the theme font may have none.
+        if (face != null && pattern.indexOf('d') >= 0) line.setLetterTypeface(face);
+        else if (face != null) line.setTypeface(face);
+        line.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        root.addView(line, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+        line.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+            float scale = root.getWidth() / 1920f;
+            v.setTranslationX(at[0] * scale - (left ? 0 : v.getWidth() / 2f));
+            v.setTranslationY(at[1] * scale - v.getHeight() / 2f);
+        });
+    }
+
+    /** A slot layout's tagline at its fixed point; returns its y in root coordinates. */
+    private float placeSlotHero(int position) {
+        float scale = root.getWidth() / 1920f;
+        float x, y;
+        if (taglineSlot != null) {
+            x = taglineSlot[0] * scale;
+            y = taglineSlot[1] * scale;
+        } else {
+            return hero.getY();
+        }
+        ViewGroup.MarginLayoutParams lp = (ViewGroup.MarginLayoutParams) hero.getLayoutParams();
+        if (lp.leftMargin != Math.round(x)) {
+            lp.leftMargin = Math.round(x);
+            lp.setMarginStart(Math.round(x));
+            hero.setLayoutParams(lp);
+        }
+        return y;
+    }
+
     private View firstTopButton() {
         if (btnWifi.getVisibility() == View.VISIBLE) return btnWifi;
         if (btnReorder.getVisibility() == View.VISIBLE) return btnReorder;
         return findViewById(R.id.btnSettings);
     }
 
+    /**
+     * A slot layout's D-pad: along the arc (Left/Right) or the column (Up/Down), stopping at the ends; past the
+     * first logo is the top bar, past the last (or Down from an arc) the More apps button. Explicit, because the
+     * default focus search goes by distance and on an arc Up would jump to a higher logo.
+     */
+    private boolean onSlotKey(int position, int keyCode) {
+        int last = adapter.appCount() - 1;
+        boolean back = keyCode == (logoVertical ? KeyEvent.KEYCODE_DPAD_UP : KeyEvent.KEYCODE_DPAD_LEFT);
+        boolean forward = keyCode == (logoVertical ? KeyEvent.KEYCODE_DPAD_DOWN : KeyEvent.KEYCODE_DPAD_RIGHT);
+        boolean toTop = !logoVertical && keyCode == KeyEvent.KEYCODE_DPAD_UP || logoVertical && back && position == 0;
+        // On the D-shaped arc the library button sits in its hollow, to the left of every logo.
+        boolean toMore = !logoVertical && keyCode == KeyEvent.KEYCODE_DPAD_DOWN
+                || logoVertical && (forward && position == last || keyCode == KeyEvent.KEYCODE_DPAD_LEFT);
+        if (toTop) {
+            btnLogos.requestFocus();
+        } else if (toMore) {
+            if (adapter.isLibraryAt(adapter.appCount())) focusLibrary();
+        } else if (back && position > 0) {
+            focusTile(position - 1);
+        } else if (forward && position < last) {
+            focusTile(position + 1);
+        } else {
+            return true;   // an end of the arc or column, or the cross axis: stay
+        }
+        grid.playSoundEffect(SoundEffectConstants.getContantForFocusDirection(
+                keyCode == KeyEvent.KEYCODE_DPAD_UP ? View.FOCUS_UP : keyCode == KeyEvent.KEYCODE_DPAD_DOWN
+                        ? View.FOCUS_DOWN : keyCode == KeyEvent.KEYCODE_DPAD_LEFT ? View.FOCUS_LEFT : View.FOCUS_RIGHT));
+        return true;
+    }
+
     @Override public void onLibraryUp() {
+        if (slotLayout) { focusTile(lastFocused); return; }
         if (adapter.appCount() == 0) { firstTopButton().requestFocus(); return; }
         int lastRow = ((adapter.appCount() - 1) / COLUMNS) * COLUMNS;
         focusTile(Math.min(lastRow + lastFocused % COLUMNS, adapter.appCount() - 1));

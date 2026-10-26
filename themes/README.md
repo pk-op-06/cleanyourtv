@@ -14,6 +14,7 @@ powershell -ExecutionPolicy Bypass -File tools\theme.ps1 -TvHost 192.168.1.50 th
 
 | Theme | What it does | Screenshot |
 |---|---|---|
+| `batman/` | Three layouts behind the top bar's Theme button: Classic (a Gotham skyline and Bat-Signal drawn by `make/make_gotham.py`, banners on the dock), Dark Knight (white logos on an arc around Batman in shadow, the time top-centre) and Gotham Guardian (white logos on a D beside a comic Batman, the day between them). Bare top-bar icons, a Bluetooth button. Artwork and logos are not MIT: see `batman/CREDITS.md` | <img src="batman/screenshot.jpg" width="320" alt="batman theme"> |
 | `default/` | The built-in look written out as JSON, as a starting point for your own | <img src="default/screenshot.jpg" width="320" alt="default theme"> |
 | `aurora/` | A dark aurora wallpaper (teal and violet on navy, darker at the bottom) with a matching background colour | <img src="aurora/screenshot.jpg" width="320" alt="aurora theme"> |
 | `dussehra/` | Festive skin for Dussehra (ends 21 Oct 2026): a marigold toran, a faint gold rangoli, a diya for Wi-Fi, a bell for Inputs, a marigold for Settings and a petal shower | <img src="dussehra/screenshot.jpg" width="320" alt="dussehra theme"> |
@@ -117,6 +118,37 @@ A new key needs one there in the same pull request.
 | `ambient_glow` | bool | The glow behind the dock in the focused app's colour (`true` by default); `false` keeps only `background_color` or the wallpaper, e.g. for a calm photo background |
 | `app_glow` | bool | The focus highlight glows in the focused app's colour on every tile, as `cinematic_home` does for the dock (`false` by default) |
 | `fade_rows` | bool | The rows fade out as they scroll up under the clock instead of being cut off at a hard line; the wallpaper or sky shows through. The grid then draws into a hardware layer (about 6 MB of graphics memory at 1080p) (`false` by default) |
+| `wallpaper_file` | file name | A layout's own picture beside `config.json` (`wallpaper-<name>.webp`/`.jpg`/`.png`) instead of `wallpaper.jpg`; the on-TV wallpaper pick does not override it. Layouts only (see [Layouts](#layouts)) |
+| `logo_slots` | list of `[x, y]` | Dock apps at fixed points instead of a row: each tile's centre on a 1920x1080 screen, scaled to the real one; apps past the last point are left off Home (the App library has them). No dock band, no grid rows. Layouts only |
+| `more_slot` | `[x, y]` | With `logo_slots`, the centre of the App library button, drawn as a bare icon. Needs `app_library` |
+| `logo_axis` | `horizontal` or `vertical` | With `logo_slots`, Left/Right (an arc, the default) or Up/Down (a column or a D) moves between the logos; past the first one is the top bar, past the last (and Left on a vertical axis) the App library button |
+| `logo_tile_height` | 1080p pixels | With `logo_slots`, the tile height of a logo (124 by default); its width is 16:9 of that |
+| `logo_scale` | number | With `logo_slots`, how much the focused logo grows (1.08 by default); logo tiles have no card and no glass box |
+| `tagline_slot` | `[x, y]` | With `logo_slots` and `dock_title`, the focused app's label (`app_labels`) at this top-left point |
+| `tagline_size` | sp | Text size of the dock title in a layout (`0` keeps the layout's own) |
+| `app_colors` | list of `"package=#RRGGBB"` | The glow colour for an app whose logo gives none to sample (a white logo) |
+| `minimal_header` | bool | Only the time top-left: no greeting, AM/PM, divider or date (`false` by default) |
+| `bare_buttons` | bool | Top-bar buttons as bare icons with no pill and no label; a white circle shows only behind the focused one (`false` by default) |
+| `auto_hide_top_bar` | bool | The top-bar buttons fade out while focus is on Home's tiles and back in when it reaches them; they stay focusable (`false` by default) |
+| `clock_slot` | `[x, y]` | The time centred on this point at 1080p instead of top-left |
+| `day_slot` | `[x, y]` | The weekday as its own line, centred on this point (or starting at it with `header_align_left`) |
+| `date_slot` | `[x, y]` | The date ("24 OCTOBER") as its own line, like `day_slot` |
+| `header_align_left` | bool | `day_slot` and `date_slot` start at their point instead of centring on it (`false` by default) |
+| `day_size` | sp | Text size of the `day_slot` line (20 by default) |
+| `date_size` | sp | Text size of the `date_slot` line (18 by default) |
+| `clock_font` | file name | A font beside `config.json` (`font-<name>.otf`/`.ttf`) for the weekday line, and for the date's letters; digits keep the launcher's font, so a display font without digits still works |
+
+## Layouts
+
+The top bar's Theme button (shown when a theme pushes at least one layout) opens a picker of the theme's layouts:
+Classic, which is `config.json` as it is, and one card per `config-<name>.json` beside it (`arc` and `side` are the
+names the picker labels; see `themes/batman`). Picking one saves it on the TV and rebuilds Home; its keys are laid
+over `config.json` key by key, except the remote-key ones (`app_keys` and the `*_key_*` lists), which the key
+helpers read only when they bind. Each card shows `preview-<name>.webp` (320x180) if the theme has one.
+
+A layout's files (`config-<name>.json`, `wallpaper-<name>.webp`, `preview-<name>.webp`, `font-<name>.otf`) sit beside
+`config.json`; `tools/theme.sh` and `tools/push-theme.sh` push them. The launcher keeps a private copy of the ones in
+use, so after a reboot Home comes up in the picked layout before shared storage is mounted.
 
 ## Wallpapers
 

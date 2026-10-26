@@ -305,6 +305,15 @@
                 android:clipToPadding="false"
                 android:orientation="horizontal">
 
+                <!-- Theme: opens the picker of the theme's layouts (MainActivity.showLayoutPicker). -->
+                <TextView
+                    android:id="@+id/btnLogos"
+                    style="@style/TopButtonIcon"
+                    android:visibility="gone"
+                    android:contentDescription="@string/logos"
+                    android:drawableStart="@drawable/ic_picture"
+                    android:nextFocusDown="@+id/grid" />
+
                 <TextView
                     android:id="@+id/btnInputs"
                     style="@style/TopButton"
@@ -320,6 +329,14 @@
                     android:ellipsize="end"
                     android:text="@string/wifi"
                     android:drawableStart="@drawable/ic_wifi"
+                    android:nextFocusDown="@+id/grid" />
+
+                <!-- Bluetooth settings, for pairing headphones or a speaker quickly. -->
+                <TextView
+                    android:id="@+id/btnBluetooth"
+                    style="@style/TopButtonIcon"
+                    android:contentDescription="@string/bluetooth"
+                    android:drawableStart="@drawable/ic_bluetooth"
                     android:nextFocusDown="@+id/grid" />
 
                 <TextView

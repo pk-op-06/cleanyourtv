@@ -104,6 +104,16 @@ if [ -f "$THEME/wallpapers/captions.txt" ]; then
 else
   tv "$(del wallpapers/captions.txt)" >/dev/null
 fi
+# Layouts for the top bar's Layout button: config-<name>.json with its wallpaper-<name>.webp, and a picker
+# snapshot preview-<name>.webp per layout. A push replaces the set, so a removed layout leaves nothing behind.
+tv "rm -f $DIR/config-*.json $DIR/wallpaper-*.* $DIR/preview-*.* $DIR/font-*.* 2>/dev/null" >/dev/null
+for F in "$THEME"/config-*.json "$THEME"/wallpaper-*.webp "$THEME"/preview-*.webp "$THEME"/font-*.otf "$THEME"/font-*.ttf; do
+  [ -f "$F" ] || continue
+  NAME=$(basename "$F")
+  [[ "$NAME" =~ ^((config|wallpaper|preview)-[a-z]+\.(json|webp)|font-[a-z]+\.(otf|ttf))$ ]] || { echo "unsupported layout file: $NAME" >&2; exit 1; }
+  "$PY" -I b64push.py "$F" "$(stage "$NAME")"
+  tv "$(put "$NAME")" >/dev/null
+done
 tv "printf '%s' '$REVISION' > $TMP-theme_revision; $(put theme_revision)" >/dev/null
 tv "$RESTART; echo applied" | tail -n 1
 echo "Theme $(basename "$THEME") is on the TV. Undo with: tools/theme.sh --reset"

@@ -1,0 +1,30 @@
+{
+  "background_color": "#000000",
+  "wallpaper": true,
+  "wallpaper_true_color": false,
+  "dock_opacity": 70,
+  "ambient_glow": true,
+  "dock_apps": [
+    "com.netflix.ninja",
+    "com.amazon.amazonvideo.livingroom",
+    "in.startv.hotstar",
+    "com.google.android.youtube.tv",
+    "com.sonyliv",
+    "com.graymatrix.did",
+    "org.videolan.vlc"
+  ],
+  "app_labels": [
+    "com.netflix.ninja=The Great Indian Kapil Show",
+    "com.amazon.amazonvideo.livingroom=Panchayat",
+    "in.startv.hotstar=Balika Vadhu",
+    "com.google.android.youtube.tv=Tenali Rama",
+    "com.sonyliv=Kaun Banega Crorepati",
+    "com.graymatrix.did=Gyaarah Gyaarah"
+  ],
+  "app_keys": [
+    "190:com.google.android.youtube.tv"
+  ],
+  "icon_only_buttons": true,
+  "icon_only_inputs": true,
+  "bare_buttons": true
+}

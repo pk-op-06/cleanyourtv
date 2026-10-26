@@ -10,7 +10,15 @@ final class ThemeFiles {
     private static final Pattern IMAGE = Pattern.compile("[A-Za-z0-9_.-]+\\.(jpg|jpeg|png|webp)",
             Pattern.CASE_INSENSITIVE);
 
+    /** A layout's files beside config.json: config-arc.json, wallpaper-arc.webp, preview-classic.webp. */
+    private static final Pattern LAYOUT_FILE = Pattern.compile(
+            "(config-[a-z]+\\.json|(wallpaper|preview)-[a-z]+\\.(webp|jpg|png)|font-[a-z]+\\.(otf|ttf))");
+
     private ThemeFiles() {}
+
+    static boolean layoutFile(String name) {
+        return name != null && LAYOUT_FILE.matcher(name).matches();
+    }
 
     /** The path relative to the theme directory, e.g. "config.json" or "wallpapers/dusk.jpg", or null if refused. */
     static String path(List<String> segments) {
@@ -18,7 +26,7 @@ final class ThemeFiles {
         if (segments.size() == 1) {
             String name = segments.get(0);
             return Config.FILE_NAME.equals(name) || "wallpaper.jpg".equals(name) || "theme_revision".equals(name)
-                    ? name : null;
+                    || layoutFile(name) ? name : null;
         }
         if (segments.size() == 2 && WALLPAPERS.equals(segments.get(0))
                 && (collectionImage(segments.get(1)) || WallpaperCaptions.FILE_NAME.equals(segments.get(1)))) {

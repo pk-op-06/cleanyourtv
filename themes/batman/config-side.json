@@ -1,0 +1,73 @@
+{
+  "minimal_header": true,
+  "bare_buttons": true,
+  "app_library": true,
+  "library_button": false,
+  "always_show_names": false,
+  "dock_title": false,
+  "ambient_glow": false,
+  "logo_scale": 1.5,
+  "app_banners": [
+    "com.netflix.ninja=banner_white_netflix",
+    "com.amazon.amazonvideo.livingroom=banner_white_prime",
+    "in.startv.hotstar=banner_white_hotstar",
+    "com.google.android.youtube.tv=banner_white_youtube",
+    "com.sonyliv=banner_white_sonyliv",
+    "com.graymatrix.did=banner_white_zee5",
+    "org.videolan.vlc=banner_white_vlc"
+  ],
+  "wallpaper_file": "wallpaper-side.webp",
+  "logo_axis": "vertical",
+  "logo_slots": [
+    [
+      180,
+      245
+    ],
+    [
+      380,
+      291
+    ],
+    [
+      526,
+      415
+    ],
+    [
+      580,
+      585
+    ],
+    [
+      526,
+      755
+    ],
+    [
+      380,
+      879
+    ],
+    [
+      180,
+      925
+    ]
+  ],
+  "more_slot": [
+    330,
+    585
+  ],
+  "logo_tile_height": 124,
+  "auto_hide_top_bar": true,
+  "clock_slot": [
+    935,
+    500
+  ],
+  "clock_font": "font-anurati.otf",
+  "day_slot": [
+    935,
+    585
+  ],
+  "date_slot": [
+    935,
+    640
+  ],
+  "header_align_left": false,
+  "day_size": 22,
+  "date_size": 18
+}

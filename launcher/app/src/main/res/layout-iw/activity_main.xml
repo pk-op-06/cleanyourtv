@@ -342,6 +342,14 @@
                     android:drawableStart="@drawable/ic_swap_vert"
                     android:nextFocusDown="@+id/grid" />
 
+                <!-- Bluetooth settings (mirrored order: beside Wi-Fi). -->
+                <TextView
+                    android:id="@+id/btnBluetooth"
+                    style="@style/TopButtonIcon"
+                    android:contentDescription="@string/bluetooth"
+                    android:drawableStart="@drawable/ic_bluetooth"
+                    android:nextFocusDown="@+id/grid" />
+
                 <TextView
                     android:id="@+id/btnWifi"
                     style="@style/TopButton"
@@ -357,6 +365,15 @@
                     style="@style/TopButton"
                     android:text="@string/inputs"
                     android:drawableStart="@drawable/ic_input"
+                    android:nextFocusDown="@+id/grid" />
+
+                <!-- Theme: opens the picker of the theme's layouts (MainActivity.showLayoutPicker). -->
+                <TextView
+                    android:id="@+id/btnLogos"
+                    style="@style/TopButtonIcon"
+                    android:visibility="gone"
+                    android:contentDescription="@string/logos"
+                    android:drawableStart="@drawable/ic_picture"
                     android:nextFocusDown="@+id/grid" />
             </LinearLayout>
         </RelativeLayout>
