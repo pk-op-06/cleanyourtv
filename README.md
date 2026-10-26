@@ -35,6 +35,71 @@ until the 19th; old links work.
 tools live only in this repo. Other domains using the name, such as cleanyourtv.com, are not run by
 this project ([#1004](https://github.com/Gathin23/cleanyourtv/issues/1004)).
 
+## What this fork adds
+
+This is [pk-op-06/cleanyourtv](https://github.com/pk-op-06/cleanyourtv), a fork of
+[Gathin23/cleanyourtv](https://github.com/Gathin23/cleanyourtv) with the setup of a Xiaomi TV A Pro (MiTV-MZTU0,
+Google TV 14) on top. Everything below is off unless a theme turns it on, so the launcher looks and behaves as
+upstream's until you push one that uses it.
+
+| | |
+|---|---|
+| ![Dark Knight: white app logos on an arc around Batman in shadow, the time top-centre, date and day on the left](themes/batman/screenshot.jpg) | ![Gotham Guardian: white logos on a D-shaped arc beside a comic Batman, the time, day and date between them](docs/switches/logo_axis.jpg) |
+| *Dark Knight layout: logos on an arc, the time centred* | *Gotham Guardian layout: logos on a D, the day in Anurati* |
+
+**One command for the whole job.** [`./setup.sh`](setup.sh) (macOS or Linux) checks what the computer needs
+(Python tools, JDK 17, the Android SDK), finds the TV and asks everything before it touches anything:
+
+| It asks | What it does with the answer |
+|---|---|
+| Which of the TV's apps you use | Lists the apps that TV actually has (JioTV, Hotstar, a tuner app, anything else) and switches off the ones you untick. Live TV and tuner apps are always kept, because on some sets they also own the HDMI input switcher. |
+| Which services to keep | Voice assistant, Chromecast, AirPlay, Mi Cast, Miracast and firmware updates, one by one; a service goes off only on a "no". |
+| The dock | 4 to 7 slots, in your order. |
+| The Live TV app | Which one the Inputs menu opens (JioTV, the TV's tuner app...). |
+| A theme | Any folder in [`themes/`](themes/), plus an optional font file for themes that use one. |
+| The remote | Whether it has a YouTube button (mapped to keycode 190) and whether to turn on the Input-button helper. |
+
+It then shows the full list of what it will switch off and asks once. On yes it backs up the TV, runs
+`tools/disable.sh` with the model's tested list from `examples/` plus your choices, handles Google TV's setup
+wizard (and the Wi-Fi re-join that needs), runs `launcher/build-and-install.sh`, pushes the theme, offers a reboot
+check and waits for you to close ADB before confirming the port is shut. Your answers are kept in
+`work/setup-<model>.json`, and the undo command is printed at the end. Nothing is uninstalled.
+
+**Layouts, picked on the TV.** A theme can ship more than one look: `config-<name>.json` files beside its
+`config.json`, each with its own wallpaper and a picker snapshot. The first icon of the top bar, **Theme**, opens a
+picker showing a snapshot of each; choosing one rebuilds Home and keeps focus on the button. How to write one is in
+[themes/README.md](themes/README.md#layouts).
+
+| New theme options | What they do |
+|---|---|
+| `logo_slots`, `more_slot`, `logo_axis`, `logo_tile_height`, `logo_scale` | Dock apps on fixed points of the screen instead of a row (an arc, a column, a D), with no band and no boxes; the focused logo grows. Only the dock apps are on Home; the App library button (a bare icon) has the rest. The D-pad follows the shape. |
+| `minimal_header`, `clock_slot`, `day_slot`, `date_slot`, `header_align_left`, `day_size`, `date_size` | Only the time, placed anywhere, with the weekday and the date as their own lines. |
+| `clock_font` | A font pushed with the theme for the weekday and the date's letters; digits stay in the launcher's font, so a display font without numbers works. |
+| `bare_buttons`, `auto_hide_top_bar` | Top-bar buttons as bare icons with a white circle only when focused, fading out while you browse apps and back in when you press Up. |
+| `wallpaper_file`, `app_colors`, `tagline_slot`, `tagline_size` | A layout's own wallpaper, glow colours for white logos, and where the focused app's label goes. |
+
+All of them are in the [Keys table](themes/README.md#keys), with a screenshot each in [docs/switches.md](docs/switches.md).
+
+**Also in the launcher:**
+
+- **A Bluetooth button** beside Wi-Fi that opens "Remotes and accessories", where paired headphones connect with one
+  press. On firmware without a handler for the standard Bluetooth action (the MiTV-MZTU0) it opens that page as a
+  settings slice.
+- **Home comes up in the picked layout right after a reboot.** The launcher keeps private copies of the theme files
+  in use; on some TVs shared storage mounts 30-40 s after Home starts, and Home used to show the built-in look until then.
+- **Sharper logos**: a logo tile zooms without a hardware layer, so a 1.5x zoom does not stretch a low-resolution copy.
+
+**[`themes/batman`](themes/batman/)** uses all of it: Classic (a Gotham skyline and Bat-Signal drawn in code, the
+apps' own banners on the dock), Dark Knight and Gotham Guardian. The Batman pictures and app logos belong to their
+owners and are not under this repository's MIT licence: see [`themes/batman/CREDITS.md`](themes/batman/CREDITS.md).
+The Anurati font the layouts name is not included (its free download is a demo licence); `./setup.sh` asks for a copy.
+
+**[`tools/push-theme.sh`](tools/push-theme.sh)** pushes a theme file by file with an md5 check per file and restarts
+Home in short steps. On the MiTV-MZTU0, `tools/theme.sh`'s single restart command timed out and left the remote-key
+helper switched off, which broke the YouTube and Apps buttons. That and the rest of what this TV needed (the remote's
+keycodes, the Bluetooth page, the storage delay) are in
+[docs/devices/xiaomi-mitv-mztu0.md](docs/devices/xiaomi-mitv-mztu0.md).
+
 ## How it works
 
 Android TVs have the same debug bridge as Android phones. Switch on USB debugging in the TV's
